@@ -142,10 +142,12 @@ func Sign(msg []byte, seckey []byte) ([]byte, error) {
 // sig must be a 65-byte compact ECDSA signature containing the
 // recovery id as the last element.
 func RecoverPubkey(msg []byte, sig []byte) ([]byte, error) {
-	return RecoverPubkeyWithContext(DefaultContext, msg, sig)
+	return RecoverPubkeyWithContext(DefaultContext, msg, sig, nil)
 }
 
-func RecoverPubkeyWithContext(context *Context, msg []byte, sig []byte) ([]byte, error) {
+// RecoverPubkeyWithContext performs recovery and appends the public key to the given pkbuf
+// If there is enough capacity in pkbuf, no extra allocation is made
+func RecoverPubkeyWithContext(context *Context, msg []byte, sig []byte, pkbuf []byte) ([]byte, error) {
 	if len(msg) != 32 {
 		return nil, ErrInvalidMsgLen
 	}
@@ -153,12 +155,18 @@ func RecoverPubkeyWithContext(context *Context, msg []byte, sig []byte) ([]byte,
 		return nil, err
 	}
 
+	var pubkey []byte
+	if total := len(pkbuf) + 65; cap(pkbuf) >= total {
+		pubkey = pkbuf[:65] // Reuse the space in pkbuf, is it has enough capacity
+	} else {
+		pubkey = make([]byte, total)
+		copy(pubkey, pkbuf)
+	}
 	var (
-		pubkey  = make([]byte, 65)
 		sigdata = (*C.uchar)(unsafe.Pointer(&sig[0]))
 		msgdata = (*C.uchar)(unsafe.Pointer(&msg[0]))
 	)
-	if C.secp256k1_ext_ecdsa_recover(context.context, (*C.uchar)(unsafe.Pointer(&pubkey[0])), sigdata, msgdata) == 0 {
+	if C.secp256k1_ext_ecdsa_recover(context.context, (*C.uchar)(unsafe.Pointer(&pubkey[len(pkbuf)])), sigdata, msgdata) == 0 {
 		return nil, ErrRecoverFailed
 	}
 	return pubkey, nil
